@@ -30,31 +30,53 @@ async function run() {
         await client.connect();
 
         const booksCollection = client.db('bookLibraryDB').collection('books');
+        const borrowCollection = client.db('bookLibraryDB').collection('borrowed');
+
+        app.post('/borrowed', async (req, res) => {
+            const borrow = req.body;
+            console.log(borrow);
+            const result = await borrowCollection.insertOne(borrow);
+            res.send(result);
+
+        })
 
         app.get('/books', async (req, res) => {
             const cursor = booksCollection.find();
             const result = await cursor.toArray();
             res.send(result);
-
         })
-
-        app.get('/booksByCat', async (req, res)=>{
+        app.get('/booksByCat', async (req, res) => {
             // console.log(req.query.category);
             const query = { category: req.query.category };
             const options = {
-                        // Sort returned documents in ascending order by title (A->Z)
-                        sort: { name: 1 },
-                    };
+                sort: { name: 1 },
+            };
             const result = await booksCollection.find(query, options).toArray();
-            // const result = await booksCollection.find().toArray();
+            res.send(result);
+        })
+        app.get('/books/:id', async (req, res) => {
+            const id = req.params.id
+            const query = { _id: new ObjectId(id) };
+            const result = await booksCollection.findOne(query);
+            res.send(result);
+
+        })
+        // get info from db borroewd books by user
+        app.get('/borrowed', async (req, res) => {
+            const cursor = borrowCollection.find();
+            const result = await cursor.toArray();
             res.send(result);
         })
 
-        app.get('/books/:id', async (req, res)=>{
-            const id = req.params.id
-            // console.log(id);
+        app.patch('/books/:id', async (req, res) => {
+            console.log(req.body);
+            const id = req.body.id
             const query = { _id: new ObjectId(id) };
-            const result = await booksCollection.findOne(query);
+            const update = { $inc: { qty: -1 } };
+            const options = { returnOriginal: false };
+            const result = await booksCollection.findOneAndUpdate(query, update, options);
+            console.log(result);
+            
             res.send(result);
 
         })
