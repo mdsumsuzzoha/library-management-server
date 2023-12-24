@@ -32,13 +32,7 @@ async function run() {
         const booksCollection = client.db('bookLibraryDB').collection('books');
         const borrowCollection = client.db('bookLibraryDB').collection('borrowed');
 
-        app.post('/borrowed', async (req, res) => {
-            const borrow = req.body;
-            console.log(borrow);
-            const result = await borrowCollection.insertOne(borrow);
-            res.send(result);
-
-        })
+        
 
         app.get('/books', async (req, res) => {
             const cursor = booksCollection.find();
@@ -61,22 +55,34 @@ async function run() {
             res.send(result);
 
         })
-        // get info from db borroewd books by user
+        // get info from db borroewd books by specific user
         app.get('/borrowed', async (req, res) => {
-            const cursor = borrowCollection.find();
-            const result = await cursor.toArray();
+            // console.log(req.query);
+            const query = { email: req.query.email};
+            const options = {
+                sort: { returnDate: 1 },
+            };
+            const result = await borrowCollection.find(query, options).toArray();
             res.send(result);
         })
 
+        app.post('/borrowed', async (req, res) => {
+            const borrow = req.body;
+            // console.log(borrow);
+            const result = await borrowCollection.insertOne(borrow);
+            res.send(result);
+
+        })
+        
         app.patch('/books/:id', async (req, res) => {
-            console.log(req.body);
+            // console.log(req.body);
             const id = req.body.id
             const query = { _id: new ObjectId(id) };
             const update = { $inc: { qty: -1 } };
             const options = { returnOriginal: false };
             const result = await booksCollection.findOneAndUpdate(query, update, options);
             console.log(result);
-            
+
             res.send(result);
 
         })
