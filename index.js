@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser')
 require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 5000;
@@ -8,8 +10,12 @@ const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // Middleware 
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:5173'],
+    credentials: true
+}));
 app.use(express.json());
+app.use(cookieParser());
 
 
 
@@ -24,6 +30,31 @@ const client = new MongoClient(uri, {
     }
 });
 
+
+// middleware
+const logger = async (req, res, next) => {
+    console.log('called', req.host, req.originalUrl)
+    next();
+}
+
+const verifyToken = async (req, res, next) => {
+    const token = req.cookies?.token;
+    // console.log('midl', token);
+    if (!token) {
+        return res.status(401).send({ message: 'Unauthorized user' })
+    }
+    jwt.verify(token, process.env.ACCESS_TOCKEN_SECRET, (err, decoded) => {
+        if (err) {
+            console.log('inside err', err)
+            return res.status(401).send({ message: 'Unauthorized access' })
+        }
+        // console.log('inside of if valid', decoded)
+        req.user = decoded;
+        next();
+    })
+
+}
+
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
@@ -32,11 +63,30 @@ async function run() {
         const booksCollection = client.db('bookLibraryDB').collection('books');
         const borrowCollection = client.db('bookLibraryDB').collection('borrowed');
 
-        
 
-        app.get('/books', async (req, res) => {
-            const cursor = booksCollection.find();
-            const result = await cursor.toArray();
+        // auth related api
+        app.post('/jwt',  async (req, res) => {
+            const user = req.body;
+            const token = jwt.sign(user, process.env.ACCESS_TOCKEN_SECRET, { expiresIn: '1h' })
+            res
+                .cookie('token', token, {
+                    httpOnly: true,
+                    secure: false,
+                    // sameSite: 'none'
+                }).send({ success: true });
+        });
+
+
+        app.get('/allBooks', verifyToken, async (req, res) => {
+            console.log(req.query)
+            console.log(req.headers)
+            if (req.user.email !== 'abc_librarian@email.com') {
+                return res.status(403).send({ message: 'Forbidden access' })
+            }
+            const options = {
+                sort: { returnDate: 1 },
+            };
+            const result = await booksCollection.find().toArray();
             res.send(result);
         })
         app.get('/booksByCat', async (req, res) => {
@@ -56,9 +106,16 @@ async function run() {
 
         })
         // get info from db borroewd books by specific user
-        app.get('/borrowed', async (req, res) => {
+        app.get('/borrowed', verifyToken, async (req, res) => {
             // console.log(req.query);
-            const query = { email: req.query.email};
+            // console.log("user with valid token", req.user);
+            if (req.query.email !== req.user.email) {
+                return res.status(403).send({ message: 'Forbidden access' })
+            }
+            let query = {};
+            if (req.query?.email) {
+                query = { email: req.query.email };
+            }
             const options = {
                 sort: { returnDate: 1 },
             };
@@ -73,16 +130,32 @@ async function run() {
             res.send(result);
 
         })
-        
-        app.patch('/books/:id', async (req, res) => {
-            // console.log(req.body);
-            const id = req.body.id
+        // to decrease qty of book to borrow
+        app.patch('/books/:_id/decrease', async (req, res) => {
+            const id = req.params._id;
             const query = { _id: new ObjectId(id) };
-            const update = { $inc: { qty: -1 } };
+            const update = { $inc: { qty: -1 } }; // Decrease qty by 1
             const options = { returnOriginal: false };
             const result = await booksCollection.findOneAndUpdate(query, update, options);
-            console.log(result);
+            // console.log(result);
+            res.send(result);
+        })
+        // to increase qty of book to borrow
+        app.patch('/books/:_id/increase', async (req, res) => {
+            const bookId = req.params._id;
+            const query = { _id: new ObjectId(bookId) };
+            const update = { $inc: { qty: +1 } };
+            const options = { returnOriginal: false };
+            const result = await booksCollection.findOneAndUpdate(query, update, options);
+            // console.log(result);
+            res.send(result);
+        })
 
+        app.delete('/borrowed/:id', async (req, res) => {
+            const id = req.params;
+            // console.log(id);
+            const query = { _id: new ObjectId(id) }
+            const result = await borrowCollection.deleteOne(query);
             res.send(result);
 
         })
