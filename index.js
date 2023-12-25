@@ -65,7 +65,7 @@ async function run() {
 
 
         // auth related api
-        app.post('/jwt',  async (req, res) => {
+        app.post('/jwt', async (req, res) => {
             const user = req.body;
             const token = jwt.sign(user, process.env.ACCESS_TOCKEN_SECRET, { expiresIn: '1h' })
             res
@@ -76,52 +76,106 @@ async function run() {
                 }).send({ success: true });
         });
 
+        app.post('/addBook', verifyToken, async (req, res) => {
+            try {
+                const bookInfo = req.body;
+
+                if (req.user.email === 'abc_librarian@email.com') {
+                    const result = await booksCollection.insertOne(bookInfo);
+                    // console.log(bookInfo);
+                    res.send(result);
+                } else {
+                    return res.status(403).send({ message: 'Forbidden access' });
+                }
+            } catch (error) {
+                // console.error('Error in adding book:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
 
         app.get('/allBooks', verifyToken, async (req, res) => {
-            console.log(req.query)
-            console.log(req.headers)
-            if (req.user.email !== 'abc_librarian@email.com') {
-                return res.status(403).send({ message: 'Forbidden access' })
-            }
-            const options = {
-                sort: { returnDate: 1 },
-            };
-            const result = await booksCollection.find().toArray();
-            res.send(result);
-        })
-        app.get('/booksByCat', async (req, res) => {
-            // console.log(req.query.category);
-            const query = { category: req.query.category };
-            const options = {
-                sort: { name: 1 },
-            };
-            const result = await booksCollection.find(query, options).toArray();
-            res.send(result);
-        })
-        app.get('/books/:id', async (req, res) => {
-            const id = req.params.id
-            const query = { _id: new ObjectId(id) };
-            const result = await booksCollection.findOne(query);
-            res.send(result);
+            try {
+                // console.log(req.query);
+                // console.log(req.headers);
 
-        })
+                if (req.user.email !== 'abc_librarian@email.com') {
+                    return res.status(403).send({ message: 'Forbidden access' });
+                }
+
+                const options = {
+                    sort: { returnDate: 1 },
+                };
+
+                const result = await booksCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                // console.error('Error in fetching all books:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
+        app.get('/booksByCat', async (req, res) => {
+            try {
+                const query = { category: req.query?.category };
+                const options = {
+                    sort: { name: 1 },
+                };
+
+                if (!req.query.category) {
+                    const result = await booksCollection.find({}, options).toArray();
+                    // console.log(result);
+                    return res.send(result);
+                }
+
+                const result = await booksCollection.find(query, options).toArray();
+                res.send(result);
+            } catch (error) {
+                // console.error('Error in fetching books by category:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
+        app.get('/books/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const result = await booksCollection.findOne(query);
+
+                if (result) {
+                    res.send(result);
+                } else {
+                    return res.status(404).send({ message: 'Book not found' });
+                }
+            } catch (error) {
+                // console.error('Error in fetching book by ID:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
         // get info from db borroewd books by specific user
         app.get('/borrowed', verifyToken, async (req, res) => {
-            // console.log(req.query);
-            // console.log("user with valid token", req.user);
-            if (req.query.email !== req.user.email) {
-                return res.status(403).send({ message: 'Forbidden access' })
+            try {
+                // console.log(req.query?.email);
+                // console.log(req.user.email);
+
+                const query = { email: req.query.email };
+
+                if (req.query?.email === req.user.email) {
+                    const options = {
+                        sort: { returnDate: 1 },
+                    };
+
+                    const result = await borrowCollection.find(query, options).toArray();
+                    res.send(result);
+                } else {
+                    return res.status(403).send({ message: 'Forbidden access' });
+                }
+            } catch (error) {
+                // console.error('Error in fetching borrowed items:', error);
+                return res.status(500).send({ message: 'Internal server error' });
             }
-            let query = {};
-            if (req.query?.email) {
-                query = { email: req.query.email };
-            }
-            const options = {
-                sort: { returnDate: 1 },
-            };
-            const result = await borrowCollection.find(query, options).toArray();
-            res.send(result);
-        })
+        });
 
         app.post('/borrowed', async (req, res) => {
             const borrow = req.body;
@@ -130,35 +184,67 @@ async function run() {
             res.send(result);
 
         })
+
         // to decrease qty of book to borrow
         app.patch('/books/:_id/decrease', async (req, res) => {
-            const id = req.params._id;
-            const query = { _id: new ObjectId(id) };
-            const update = { $inc: { qty: -1 } }; // Decrease qty by 1
-            const options = { returnOriginal: false };
-            const result = await booksCollection.findOneAndUpdate(query, update, options);
-            // console.log(result);
-            res.send(result);
-        })
+            try {
+                const id = req.params._id;
+                const query = { _id: new ObjectId(id) };
+                const update = { $inc: { qty: -1 } }; // Decrease qty by 1
+                const options = { returnOriginal: false };
+
+                const result = await booksCollection.findOneAndUpdate(query, update, options);
+
+                if (result.value) {
+                    res.send(result.value);
+                } else {
+                    return res.status(404).send({ message: 'Book not found' });
+                }
+            } catch (error) {
+                // console.error('Error in decreasing book quantity:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
         // to increase qty of book to borrow
         app.patch('/books/:_id/increase', async (req, res) => {
-            const bookId = req.params._id;
-            const query = { _id: new ObjectId(bookId) };
-            const update = { $inc: { qty: +1 } };
-            const options = { returnOriginal: false };
-            const result = await booksCollection.findOneAndUpdate(query, update, options);
-            // console.log(result);
-            res.send(result);
-        })
+            try {
+                const bookId = req.params._id;
+                const query = { _id: new ObjectId(bookId) };
+                const update = { $inc: { qty: 1 } }; // Increase qty by 1
+                const options = { returnOriginal: false };
+
+                const result = await booksCollection.findOneAndUpdate(query, update, options);
+
+                if (result.value) {
+                    res.send(result.value);
+                } else {
+                    return res.status(404).send({ message: 'Book not found' });
+                }
+            } catch (error) {
+                // console.error('Error in increasing book quantity:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
 
         app.delete('/borrowed/:id', async (req, res) => {
-            const id = req.params;
-            // console.log(id);
-            const query = { _id: new ObjectId(id) }
-            const result = await borrowCollection.deleteOne(query);
-            res.send(result);
+            try {
+                const id = req.params.id; // Access the 'id' parameter correctly
+                const query = { _id: new ObjectId(id) };
+                const result = await borrowCollection.deleteOne(query);
 
-        })
+                if (result.deletedCount === 1) {
+                    res.send({ message: 'Item deleted successfully' });
+                } else {
+                    return res.status(404).send({ message: 'Item not found' });
+                }
+            } catch (error) {
+                // console.error('Error in deleting item:', error);
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
 
 
 
