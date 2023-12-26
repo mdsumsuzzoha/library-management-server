@@ -1,4 +1,5 @@
 const express = require('express');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser')
@@ -7,11 +8,26 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 // Middleware 
+// const corsConfig = {
+//     origin: [
+//         // 'http://localhost:5173',
+//         'https://library-management-d414f.web.app',
+//         'https://library-management-d414f.firebaseapp.com'
+//     ],
+//     credentials: true,
+//     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+// }
+// app.use(cors(corsConfig))
+// app.options("", cors(corsConfig))
+
 app.use(cors({
-    origin: ['http://localhost:5173'],
+    origin: [
+        // 'http://localhost:5173'
+        'https://library-management-d414f.web.app',
+        'https://library-management-d414f.firebaseapp.com'
+    ],
     credentials: true
 }));
 app.use(express.json());
@@ -27,15 +43,18 @@ const client = new MongoClient(uri, {
         version: ServerApiVersion.v1,
         strict: true,
         deprecationErrors: true,
-    }
+    },
+    // connection pool for vercel
+    // ==========================
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    maxPoolSize: 10,
+    // ==========================
 });
 
 
 // middleware
-const logger = async (req, res, next) => {
-    console.log('called', req.host, req.originalUrl)
-    next();
-}
+
 
 const verifyToken = async (req, res, next) => {
     const token = req.cookies?.token;
@@ -45,7 +64,6 @@ const verifyToken = async (req, res, next) => {
     }
     jwt.verify(token, process.env.ACCESS_TOCKEN_SECRET, (err, decoded) => {
         if (err) {
-            console.log('inside err', err)
             return res.status(401).send({ message: 'Unauthorized access' })
         }
         // console.log('inside of if valid', decoded)
@@ -58,7 +76,18 @@ const verifyToken = async (req, res, next) => {
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
+
+        // connection pool for vercel
+        // ==========================
+         client.connect((err) => {
+            if (err) {
+                // console.error(err);
+                return;
+            }
+        });
+        // ==========================
+
 
         const booksCollection = client.db('bookLibraryDB').collection('books');
         const borrowCollection = client.db('bookLibraryDB').collection('borrowed');
@@ -72,108 +101,25 @@ async function run() {
                 .cookie('token', token, {
                     httpOnly: true,
                     secure: false,
-                    // sameSite: 'none'
+                    // sameSite:"strict",
                 }).send({ success: true });
         });
 
-        app.post('/addBook', verifyToken, async (req, res) => {
+        app.post('/addBook', async (req, res) => {
             try {
                 const bookInfo = req.body;
 
+                const result = await booksCollection.insertOne(bookInfo);
+                // console.log(bookInfo);
+                res.send(result);
+
                 if (req.user.email === 'abc_librarian@email.com') {
-                    const result = await booksCollection.insertOne(bookInfo);
-                    // console.log(bookInfo);
-                    res.send(result);
+
                 } else {
                     return res.status(403).send({ message: 'Forbidden access' });
                 }
-            } catch (error) {
-                // console.error('Error in adding book:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
+            } catch {
 
-
-        app.get('/allBooks', verifyToken, async (req, res) => {
-            try {
-                // console.log(req.query);
-                // console.log(req.headers);
-
-                if (req.user.email !== 'abc_librarian@email.com') {
-                    return res.status(403).send({ message: 'Forbidden access' });
-                }
-
-                const options = {
-                    sort: { returnDate: 1 },
-                };
-
-                const result = await booksCollection.find().toArray();
-                res.send(result);
-            } catch (error) {
-                // console.error('Error in fetching all books:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-        app.get('/booksByCat', async (req, res) => {
-            try {
-                const query = { category: req.query?.category };
-                const options = {
-                    sort: { name: 1 },
-                };
-
-                if (!req.query.category) {
-                    const result = await booksCollection.find({}, options).toArray();
-                    // console.log(result);
-                    return res.send(result);
-                }
-
-                const result = await booksCollection.find(query, options).toArray();
-                res.send(result);
-            } catch (error) {
-                // console.error('Error in fetching books by category:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-        app.get('/books/:id', async (req, res) => {
-            try {
-                const id = req.params.id;
-                const query = { _id: new ObjectId(id) };
-                const result = await booksCollection.findOne(query);
-
-                if (result) {
-                    res.send(result);
-                } else {
-                    return res.status(404).send({ message: 'Book not found' });
-                }
-            } catch (error) {
-                // console.error('Error in fetching book by ID:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-        // get info from db borroewd books by specific user
-        app.get('/borrowed', verifyToken, async (req, res) => {
-            try {
-                // console.log(req.query?.email);
-                // console.log(req.user.email);
-
-                const query = { email: req.query.email };
-
-                if (req.query?.email === req.user.email) {
-                    const options = {
-                        sort: { returnDate: 1 },
-                    };
-
-                    const result = await borrowCollection.find(query, options).toArray();
-                    res.send(result);
-                } else {
-                    return res.status(403).send({ message: 'Forbidden access' });
-                }
-            } catch (error) {
-                // console.error('Error in fetching borrowed items:', error);
-                return res.status(500).send({ message: 'Internal server error' });
             }
         });
 
@@ -185,24 +131,105 @@ async function run() {
 
         })
 
-        // to decrease qty of book to borrow
-        app.patch('/books/:_id/decrease', async (req, res) => {
+
+        app.get('/allBooks', async (req, res) => {
             try {
-                const id = req.params._id;
+                // console.log(req.query);
+                // console.log(req.headers);
+
+                // if (req.user.email !== 'abc_librarian@email.com') {
+                //     return res.status(403).send({ message: 'Forbidden access' });
+                // }
+
+                const options = {
+                    sort: { name: 1 },
+                };
+
+                const result = await booksCollection.find().toArray();
+                res.send(result);
+            } catch {
+            }
+        });
+
+        // get the book bycategory to show in booksByCat.jsx through useEffect
+        app.get('/booksByCat', async (req, res) => {
+            try {
+                const query = { category: req.query?.category };
+                const options = {
+                    sort: { name: 1 },
+                };
+
+                // if (!req.query.category) {
+                //     const result = await booksCollection.find({}, options).toArray();
+                //     // console.log(result);
+                //     return res.send(result);
+                // }
+                const result = await booksCollection.find(query, options).toArray();
+                res.send(result);
+
+            } catch (error) {
+            }
+        });
+
+        app.get('/books/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
                 const query = { _id: new ObjectId(id) };
-                const update = { $inc: { qty: -1 } }; // Decrease qty by 1
-                const options = { returnOriginal: false };
+                const result = await booksCollection.findOne(query);
 
-                const result = await booksCollection.findOneAndUpdate(query, update, options);
+                res.send(result);
 
-                if (result.value) {
-                    res.send(result);
+                if (result) {
                 } else {
                     return res.status(404).send({ message: 'Book not found' });
                 }
             } catch (error) {
-                // console.error('Error in decreasing book quantity:', error);
+                // console.error('Error in fetching book by ID:', error);
                 return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
+        // get info from db borroewd books by specific user
+        app.get('/borrowed', async (req, res) => {
+            try {
+                // console.log(req.query?.email);
+                // console.log(req.user.email);
+
+                const query = { email: req.query.email };
+
+                const options = {
+                    sort: { returnDate: 1 },
+                };
+
+                const result = await borrowCollection.find(query, options).toArray();
+                res.send(result);
+                if (req.query.email === req.user.email) {
+                } else {
+                    return res.status(403).send({ message: 'Forbidden access' });
+                }
+            } catch {
+                ;
+            }
+        });
+
+        // to decrease qty of book to when submit Borrow
+        app.patch('/books/:_id/decrease', async (req, res) => {
+            try {
+                const id = req.params._id;
+                console.log(id);
+                const query = { _id: new ObjectId(id) };
+                const updateDoc = {
+                    $inc: {
+                        qty: -1 // Decrementing the qty field by 1
+                    }
+                };
+                const options = { upsert: false };
+
+                const result = await booksCollection.updateOne(query, updateDoc, options);
+                console.log(result);
+                res.send(result);
+
+            } catch (error) {
             }
         });
 
@@ -210,22 +237,18 @@ async function run() {
         app.patch('/books/:_id/increase', async (req, res) => {
             try {
                 const bookId = req.params._id;
+                // console.log(bookId)
                 const query = { _id: new ObjectId(bookId) };
-                const update = { $inc: { qty: 1 } }; // Increase qty by 1
-                const options = { returnOriginal: false };
+                // console.log(query);
+                const updateDoc = { $inc: { qty: 1 } }; // Increase qty by 1
+                const options = { upsert: false };
 
-                const result = await booksCollection.findOneAndUpdate(query, update, options);
-
-                if (result.value) {
-                    res.send(result);
-                } else {
-                    return res.status(404).send({ message: 'Book not found' });
-                }
+                const result = await booksCollection.updateOne(query, updateDoc, options);
+                res.send(result);
             } catch (error) {
-                // console.error('Error in increasing book quantity:', error);
-                return res.status(500).send({ message: 'Internal server error' });
             }
         });
+
         app.put('/books/:_id', async (req, res) => {
             try {
                 const bookId = req.params._id
@@ -253,37 +276,13 @@ async function run() {
                 const result = await booksCollection.updateOne(query, updateDoc, options);
                 console.log(result);
 
-                if (result.value) {
-                    // res.send(result);
-                } else {
-                    return res.status(404).send({ message: 'Book not found' });
-                }
+                res.send(result);
+
             } catch (error) {
                 // console.error('Error in increasing book quantity:', error);
                 return res.status(500).send({ message: 'Internal server error' });
             }
         });
-
-        // app.delete('/allBooks/:id', verifyToken, async (req, res) => {
-        //     try {
-        //         const id = req.params.id;
-        //         console.log(id)
-        //         const query = { _id: new ObjectId(_id) };
-        //         console.log(query)
-        //         const result = await booksCollection.deleteOne(query);
-        //         console.log(result);
-        //         if (result.deletedCount === 1) {
-        //             // res.send(result);
-        //         } else {
-        //             return res.status(404).send({ message: 'Item not found' });
-        //         }
-
-        //     } catch (error) {
-        //         // console.error('Error in deleting item:', error);
-        //         return res.status(500).send({ message: 'Internal server error' });
-        //     }
-
-        // })
 
         app.delete('/allBooks/:id', async (req, res) => {
             try {
@@ -292,8 +291,8 @@ async function run() {
                 console.log()
                 const result = await booksCollection.deleteOne(query);
 
+                res.send(result);
                 if (result.deletedCount > 0) {
-                    res.send(result);
                 } else {
                     return res.status(404).send({ message: 'Item not found' });
                 }
