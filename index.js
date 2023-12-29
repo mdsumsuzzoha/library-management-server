@@ -10,26 +10,28 @@ const port = process.env.PORT || 5000;
 
 
 // Middleware 
-// const corsConfig = {
+const corsConfig = {
+    origin: [
+        // 'http://localhost:5173',
+        //  other allowed origins here
+        'https://library-management-d414f.web.app',
+        'https://library-management-d414f.firebaseapp.com',
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+}
+app.use(cors(corsConfig))
+app.options("", cors(corsConfig))
+
+// app.use(cors({
 //     origin: [
 //         // 'http://localhost:5173',
+//         //  other allowed origins here
+//         'https://library-management-d414f.firebaseapp.com',
 //         'https://library-management-d414f.web.app',
-//         'https://library-management-d414f.firebaseapp.com'
 //     ],
 //     credentials: true,
-//     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-// }
-// app.use(cors(corsConfig))
-// app.options("", cors(corsConfig))
-
-app.use(cors({
-    origin: [
-        // 'http://localhost:5173'
-        'https://library-management-d414f.web.app',
-        'https://library-management-d414f.firebaseapp.com'
-    ],
-    credentials: true
-}));
+// }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -57,8 +59,9 @@ const client = new MongoClient(uri, {
 
 
 const verifyToken = async (req, res, next) => {
+    // console.log(req.cookies);
     const token = req.cookies?.token;
-    // console.log('midl', token);
+    // console.log(token);
     if (!token) {
         return res.status(401).send({ message: 'Unauthorized user' })
     }
@@ -67,6 +70,7 @@ const verifyToken = async (req, res, next) => {
             return res.status(401).send({ message: 'Unauthorized access' })
         }
         // console.log('inside of if valid', decoded)
+        // console.log('inside of if valid', decoded.email)
         req.user = decoded;
         next();
     })
@@ -80,7 +84,7 @@ async function run() {
 
         // connection pool for vercel
         // ==========================
-         client.connect((err) => {
+        client.connect((err) => {
             if (err) {
                 // console.error(err);
                 return;
@@ -96,58 +100,86 @@ async function run() {
         // auth related api
         app.post('/jwt', async (req, res) => {
             const user = req.body;
-            const token = jwt.sign(user, process.env.ACCESS_TOCKEN_SECRET, { expiresIn: '1h' })
-            res
-                .cookie('token', token, {
-                    httpOnly: true,
-                    secure: false,
-                    // sameSite:"strict",
-                }).send({ success: true });
+            const token = jwt.sign(user,
+                process.env.ACCESS_TOCKEN_SECRET,
+                { expiresIn: '1h' }
+            );
+            res.cookie('token', token, {
+                // maxAge: 900000,
+                httpOnly: true,
+                secure: true,
+                sameSite: 'none',
+                // secure: false,
+                // sameSite: 'strict',
+            }).send('Token cookie set successfully');
+
         });
 
-        app.post('/addBook', async (req, res) => {
+        app.get('/logout', (req, res) => {
+            res.clearCookie('token').send('Logged out successfully')
+        });
+
+        // service related api
+        app.post('/addBook', verifyToken, async (req, res) => {
             try {
                 const bookInfo = req.body;
-
-                const result = await booksCollection.insertOne(bookInfo);
-                // console.log(bookInfo);
-                res.send(result);
-
-                if (req.user.email === 'abc_librarian@email.com') {
-
-                } else {
-                    return res.status(403).send({ message: 'Forbidden access' });
+                const adminEmail = 'abc_librarian@email.com';
+                if (adminEmail === req.user.email) {
+                    const result = await booksCollection.insertOne(bookInfo);
+                    res.send(result);
+                } else if (req.query?.email == req.user.email) {
+                    return res.status(403).send(
+                        // { message: 'Forbidden access' }
+                    );
                 }
-            } catch {
-
+                return;
+            } catch (error) {
+                return res.send(error);
             }
         });
 
-        app.post('/borrowed', async (req, res) => {
-            const borrow = req.body;
-            // console.log(borrow);
-            const result = await borrowCollection.insertOne(borrow);
-            res.send(result);
+        app.post('/borrowed', verifyToken, async (req, res) => {
+            try {
+                const borrow = req.body;
+                if (!req.user.email) {
+                    return res.status(403).send({ message: 'Forbidden access' });
+                } else {
+                    const result = await borrowCollection.insertOne(borrow);
+                    res.send(result);
+                }
+            } catch (error) {
+                return res.send(error);
+            }
 
         })
 
 
-        app.get('/allBooks', async (req, res) => {
+        app.get('/allBooks/:filterBy', verifyToken, async (req, res) => {
             try {
-                // console.log(req.query);
-                // console.log(req.headers);
+                // const userEmail = req.user.email;
+                // console.log(userEmail)
+                const filter = req.params?.filterBy;
+                // console.log(filter);
+                const qtyGTzero = { qty: { $gt: 0 } };
+                const qtyLTzero = { qty: { $lt: 1 } };
 
-                // if (req.user.email !== 'abc_librarian@email.com') {
-                //     return res.status(403).send({ message: 'Forbidden access' });
-                // }
-
-                const options = {
-                    sort: { name: 1 },
-                };
-
-                const result = await booksCollection.find().toArray();
-                res.send(result);
-            } catch {
+                const adminEmail = 'abc_librarian@email.com';
+                if (adminEmail === req.user.email) {
+                    let result;
+                    if (filter === 'avail') {
+                        result = await booksCollection.find(qtyGTzero).toArray();
+                    } else if (filter === 'na') {
+                        result = await booksCollection.find(qtyLTzero).toArray();
+                    } else {
+                        result = await booksCollection.find().toArray();
+                    }
+                    res.send(result);
+                } else {
+                    return res.status(403).send(
+                    );
+                }
+            } catch (error) {
+                return res.send(error);
             }
         });
 
@@ -158,107 +190,115 @@ async function run() {
                 const options = {
                     sort: { name: 1 },
                 };
-
-                // if (!req.query.category) {
-                //     const result = await booksCollection.find({}, options).toArray();
-                //     // console.log(result);
-                //     return res.send(result);
-                // }
                 const result = await booksCollection.find(query, options).toArray();
                 res.send(result);
 
             } catch (error) {
+                return res.send(error);
             }
         });
 
-        app.get('/books/:id', async (req, res) => {
+        app.get('/bookDetails/:id', verifyToken, async (req, res) => {
             try {
                 const id = req.params.id;
                 const query = { _id: new ObjectId(id) };
-                const result = await booksCollection.findOne(query);
-
-                res.send(result);
-
-                if (result) {
+                const user = req.user.email;
+                if (user) {
+                    const result = await booksCollection.findOne(query);
+                    res.send(result);
                 } else {
-                    return res.status(404).send({ message: 'Book not found' });
+                    return res.status(401).send({ message: 'Login First' });
                 }
             } catch (error) {
                 // console.error('Error in fetching book by ID:', error);
-                return res.status(500).send({ message: 'Internal server error' });
+                return res.send(error);
             }
         });
 
         // get info from db borroewd books by specific user
-        app.get('/borrowed', async (req, res) => {
+        app.get('/borrowed', verifyToken, async (req, res) => {
             try {
-                // console.log(req.query?.email);
-                // console.log(req.user.email);
-
                 const query = { email: req.query.email };
 
                 const options = {
                     sort: { returnDate: 1 },
                 };
 
-                const result = await borrowCollection.find(query, options).toArray();
-                res.send(result);
-                if (req.query.email === req.user.email) {
-                } else {
+                if (req.query.email !== req.user.email) {
                     return res.status(403).send({ message: 'Forbidden access' });
+                } else {
+                    const result = await borrowCollection.find(query, options).toArray();
+                    res.send(result);
                 }
-            } catch {
-                ;
+            } catch (error) {
+                return res.send(error);
             }
         });
 
         // to decrease qty of book to when submit Borrow
-        app.patch('/books/:_id/decrease', async (req, res) => {
+        app.patch('/booksQtyDec/:_id', verifyToken, async (req, res) => {
             try {
                 const id = req.params._id;
-                console.log(id);
+                // console.log("Received ID:", id);
+                const userEmail = req.user.email;
+                // console.log("Received ID:", userEmail);
                 const query = { _id: new ObjectId(id) };
+                // console.log("Query:", query);
+
                 const updateDoc = {
                     $inc: {
                         qty: -1 // Decrementing the qty field by 1
                     }
                 };
+                // console.log("Update Document:", updateDoc);
+
                 const options = { upsert: false };
 
-                const result = await booksCollection.updateOne(query, updateDoc, options);
-                console.log(result);
-                res.send(result);
+                if (userEmail) {
+                    const result = await booksCollection.updateOne(query, updateDoc, options);
+                    // console.log("Update Result:", result);
+                    res.send(result);
 
+                }
             } catch (error) {
+                // console.error("Error:", error);
+                res.status(500).send('Internal server error');
             }
         });
 
         // to increase qty of book to borrow
-        app.patch('/books/:_id/increase', async (req, res) => {
+        app.patch('/booksQtyInc/:_id', verifyToken, async (req, res) => {
             try {
-                const bookId = req.params._id;
-                // console.log(bookId)
-                const query = { _id: new ObjectId(bookId) };
-                // console.log(query);
-                const updateDoc = { $inc: { qty: 1 } }; // Increase qty by 1
-                const options = { upsert: false };
 
-                const result = await booksCollection.updateOne(query, updateDoc, options);
-                res.send(result);
+                const bookId = req.params._id;
+                const query = { _id: new ObjectId(bookId) };
+                const userEmail = req.user.email;
+
+                const updateDoc = { $inc: { qty: 1 } };
+                const options = { upsert: false };
+                if (userEmail) {
+                    const result = await booksCollection.updateOne(query, updateDoc, options);
+                    // console.log("Update Result:", result);
+                    res.send(result);
+
+                }
             } catch (error) {
+                return res.send(error);
             }
         });
 
-        app.put('/books/:_id', async (req, res) => {
+        app.patch('/updateBookDetails/:id', verifyToken, async (req, res) => {
             try {
-                const bookId = req.params._id
+                const _id = req.params.id;
+                // console.log('Received ID:', _id);
                 const updateBook = req.body;
-                // console.log(bookId);
-                // console.log(updateBook);
-                const query = { _id: new ObjectId(bookId) };
+                // console.log('Received Update Data:', updateBook);
+
+                const query = { _id: new ObjectId(_id) };
                 const options = { upsert: true };
                 const updateDoc = {
                     $set: {
+                        // Update fields based on your requirements
                         name: updateBook.name,
                         author: updateBook.author,
                         category: updateBook.category,
@@ -269,49 +309,66 @@ async function run() {
                         ISBN: updateBook.ISBN,
                         pages: updateBook.pages,
                         publisher: updateBook.publisher,
+                        publishedYear: updateBook.publishedYear,
                         language: updateBook.language
                         // Add other fields as needed
                     },
                 };
-                const result = await booksCollection.updateOne(query, updateDoc, options);
-                console.log(result);
+                // console.log('Update Document:', updateDoc);
 
-                res.send(result);
+                const adminEmail = 'abc_librarian@email.com';
 
-            } catch (error) {
-                // console.error('Error in increasing book quantity:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-
-        app.delete('/allBooks/:id', async (req, res) => {
-            try {
-                const id = req.params.id; // Access the 'id' parameter correctly
-                const query = { _id: new ObjectId(id) };
-                console.log()
-                const result = await booksCollection.deleteOne(query);
-
-                res.send(result);
-                if (result.deletedCount > 0) {
-                } else {
-                    return res.status(404).send({ message: 'Item not found' });
-                }
-            } catch (error) {
-                // console.error('Error in deleting item:', error);
-                return res.status(500).send({ message: 'Internal server error' });
-            }
-        });
-        app.delete('/borrowed/:id', async (req, res) => {
-            try {
-                const id = req.params.id; // Access the 'id' parameter correctly
-                const query = { _id: new ObjectId(id) };
-                const result = await borrowCollection.deleteOne(query);
-
-                if (result.deletedCount === 1) {
+                if (adminEmail === req.user.email) {
+                    const result = await booksCollection.updateOne(query, updateDoc, options);
+                    // console.log('Update Result:', result);
                     res.send(result);
-                } else {
-                    return res.status(404).send({ message: 'Item not found' });
+                } else if (req.query?.email == req.user.email) {
+                    return res.status(403).send(
+                        // { message: 'Forbidden access' }
+                    );
                 }
+                return;
+            } catch (error) {
+                // console.error('Error in updating book details:', error); // Log the specific error
+                return res.status(500).send({ message: 'Internal server error' });
+            }
+        });
+
+        app.delete('/allBooks/:id', verifyToken, async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const adminEmail = 'abc_librarian@email.com';
+
+                if (adminEmail === req.user.email) {
+                    const result = await booksCollection.deleteOne(query);
+                    res.send(result);
+                } else if (req.query?.email == req.user.email) {
+                    return res.status(403).send(
+                        // { message: 'Forbidden access' }
+                    );
+                }
+                return;
+            } catch (error) {
+                return res.send(error);
+            }
+        });
+
+        app.delete('/borrowed/:id', verifyToken, async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+
+                if (req.user.email) {
+                    const result = await borrowCollection.deleteOne(query);
+                    res.send(result);
+                } else if (!req.user.email) {
+                    return res.status(401).send(
+                        // { message: 'Forbidden access' }
+                    );
+                }
+                return;
+
             } catch (error) {
                 // console.error('Error in deleting item:', error);
                 return res.status(500).send({ message: 'Internal server error' });
